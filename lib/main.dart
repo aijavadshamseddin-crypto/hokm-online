@@ -3,6 +3,10 @@ import 'game_engine.dart';
 
 void main() => runApp(const HokmApp());
 
+class MyApp extends HokmApp {
+  const MyApp({super.key});
+}
+
 class HokmApp extends StatelessWidget {
   const HokmApp({super.key});
   @override
