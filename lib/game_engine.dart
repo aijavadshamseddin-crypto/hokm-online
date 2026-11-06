@@ -16,7 +16,7 @@ class PlayingCard {
 
   String get label {
     const ranks = {11: 'J', 12: 'Q', 13: 'K', 14: 'A'};
-    return '${ranks[rank] ?? rank}';
+    return '\${ranks[rank] ?? rank}';
   }
 }
 
@@ -35,6 +35,7 @@ class TrickResult {
 class HokmGame {
   final List<List<PlayingCard>> hands;
   final int hakemSeat;
+  final List<PlayingCard> _remainingDeck;
   Suit? trump;
   int currentSeat;
   final List<Map<int, PlayingCard>> _trickHistory = [];
@@ -43,7 +44,7 @@ class HokmGame {
   int tricksTeam1 = 0;
   bool isRoundOver = false;
 
-  HokmGame._(this.hands, this.hakemSeat, this.currentSeat);
+  HokmGame._(this.hands, this.hakemSeat, this.currentSeat, this._remainingDeck);
 
   factory HokmGame.newGame({int? seed, int hakemSeat = 0}) {
     if (hakemSeat < 0 || hakemSeat > 3) {
@@ -55,13 +56,14 @@ class HokmGame {
     ];
     deck.shuffle(seed == null ? Random() : Random(seed));
     final hands = List.generate(4, (_) => <PlayingCard>[]);
-    // Deal five cards to each player, then the remaining cards after trump.
-    for (var i = 0; i < 20; i++) {
-      hands[(hakemSeat + i) % 4].add(deck[i]);
-    }
-    return HokmGame._(hands, hakemSeat, hakemSeat);
+    // مرحله اول: فقط پنج کارت به حاکم داده می‌شود.
+    hands[hakemSeat].addAll(deck.take(5));
+    return HokmGame._(hands, hakemSeat, hakemSeat, deck.skip(5).toList());
   }
 
+  bool get waitingForTrump => trump == null;
+  int get dealtCardCount => hands.fold<int>(0, (sum, hand) => sum + hand.length);
+  int get remainingCardCount => _remainingDeck.length;
   static int teamOf(int seat) => seat.isEven ? 0 : 1;
   int get completedTricks => _trickHistory.length;
   List<Map<int, PlayingCard>> get trickHistory =>
@@ -77,22 +79,40 @@ class HokmGame {
       throw const HokmRuleException('فقط حاکم می‌تواند حکم را انتخاب کند');
     }
     if (trump != null) throw const HokmRuleException('حکم قبلاً انتخاب شده است');
+    if (hands[hakemSeat].length != 5 || _remainingDeck.length != 47) {
+      throw const HokmRuleException('مرحله انتخاب حکم در وضعیت نامعتبر است');
+    }
+
     trump = suit;
-    final deck = <PlayingCard>[
-      for (final s in Suit.values)
-        for (var rank = 2; rank <= 14; rank++) PlayingCard(s, rank),
-    ];
-    final dealt = hands.expand((h) => h).toSet();
-    final remaining = deck.where((c) => !dealt.contains(c)).toList();
-    remaining.shuffle(Random(1000 + hakemSeat + suit.index));
-    for (var i = 0; i < remaining.length; i++) {
-      hands[(hakemSeat + i) % 4].add(remaining[i]);
+
+    // مرحله دوم: پنج کارت به هر بازیکن دیگر، به ترتیب ساعت‌گرد از نفر بعد حاکم.
+    for (var offset = 1; offset < 4; offset++) {
+      final seatToDeal = (hakemSeat + offset) % 4;
+      hands[seatToDeal].addAll(_takeCards(5));
+    }
+
+    // مرحله سوم: ۳۲ کارت باقی‌مانده، در بسته‌های چهارتایی؛ هر بسته یک دور بین چهار نفر.
+    while (_remainingDeck.isNotEmpty) {
+      for (var offset = 0; offset < 4; offset++) {
+        final seatToDeal = (hakemSeat + offset) % 4;
+        hands[seatToDeal].addAll(_takeCards(4));
+      }
     }
     currentSeat = hakemSeat;
   }
 
+  List<PlayingCard> _takeCards(int count) {
+    if (_remainingDeck.length < count) {
+      throw const HokmRuleException('تعداد کارت‌های باقی‌مانده کافی نیست');
+    }
+    return _remainingDeck.sublist(0, count).toList()
+      ..asMap().forEach((index, card) {
+        _remainingDeck.remove(card);
+      });
+  }
+
   List<PlayingCard> legalCardsFor(int seat) {
-    if (seat < 0 || seat > 3) return [];
+    if (seat < 0 || seat > 3 || trump == null) return [];
     final hand = hands[seat];
     if (_currentTrick.isEmpty) return List.unmodifiable(hand);
     final leadSuit = _currentTrick.values.first.suit;
